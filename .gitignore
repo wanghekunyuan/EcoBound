@@ -1,0 +1,17 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.so
+
+# IDE settings
+.vscode/
+.idea/
+
+# Output and input
+output/
+input/file move out/
+
+
+# System files
+.DS_Store
+Thumbs.db
