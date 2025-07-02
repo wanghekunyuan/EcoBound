@@ -64,6 +64,7 @@ set TMP=C:\Temp
 cd "C:\Program Files\ArcGIS\Pro\bin\Python\Scripts"
 activate.bat
 conda activate arcgispro-py3-clone  # Replace with your environment name defined in Step 1
+call conda.bat activate arcgispro-py3-clone # For the newest ArcGIS pro v 3.5, Replace with your environment name defined in Step 1
 ```
 
 > ✅ This method has been fully tested and confirmed to work on Windows 10 with ArcGIS Pro 3.2 using the default cloned environment (`arcgispro-py3-clone`).
