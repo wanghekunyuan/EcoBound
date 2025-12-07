@@ -1,3 +1,5 @@
+import gc
+import rasterio
 import arcpy
 import numpy as np
 from scipy.ndimage import label
@@ -12,8 +14,15 @@ arcpy.env.overwriteOutput = True
 
 def threshold_segmentation(input_raster, threshold):
     """根据阈值将栅格分为两个区域，并确保区域完整性"""
-    # 读取栅格数据为numpy数组
-    raster = arcpy.RasterToNumPyArray(input_raster, nodata_to_value=np.nan)
+    # 读取：rasterio -> 掩膜数组；NoData 自动映射为 mask，填充为 NaN（float32）
+    with rasterio.open(str(input_raster)) as src:
+        band = src.read(1, masked=True)          # MaskedArray，可能是 int16
+        band = band.astype('float32')            # 先转成 float32（掩膜保留不变）
+        raster = band.filled(np.nan)             # 再把掩膜填成 NaN —— 安全
+    print("DEBUG dtype:", band.dtype, raster.dtype)
+    del band
+
+    gc.collect()
     
     # 打印读取的数据形状以帮助调试
     print(f"Raster shape after reading: {raster.shape}")
@@ -41,20 +50,32 @@ def threshold_segmentation(input_raster, threshold):
     if num_high_labels > 0:
         largest_high_label = np.argmax(np.bincount(high_labeled.flat)[1:]) + 1
         result[high_labeled == largest_high_label] = 2
-    
+
+    # —— 可选的内存释放（放在 return 之前）——
+    for _v in ("low_mask", "high_mask", "low_labeled", "high_labeled",
+               "valid_raster", "mask_valid"):
+        if _v in locals():
+            try:
+                del locals()[_v]
+            except:
+                pass
+    gc.collect()
+
     return result
 
+
 def save_raster(array, template_raster_path, output_raster_path):
-    """保存numpy数组为栅格"""
+    """保存numpy数组为栅格；uint8 用 0 作 NoData，浮点用 NaN。"""
     template_raster = arcpy.Raster(template_raster_path)
     spatial_ref = template_raster.spatialReference
     lower_left = arcpy.Point(template_raster.extent.XMin, template_raster.extent.YMin)
     cell_size = template_raster.meanCellWidth
 
-    # 创建输出栅格，使用np.nan作为NoData值
-    out_raster = arcpy.NumPyArrayToRaster(array, lower_left, cell_size, cell_size, value_to_nodata=np.nan)
+    nodata = 0 if array.dtype == np.uint8 else np.nan
+    out_raster = arcpy.NumPyArrayToRaster(array, lower_left, cell_size, cell_size, value_to_nodata=nodata)
     arcpy.DefineProjection_management(out_raster, spatial_ref)
     out_raster.save(output_raster_path)
+
 
 def extract_and_smooth_boundary(original_raster, segmented_raster, threshold, output_boundary_shapefile):
     """提取并平滑栅格数据中值为1和2的边界线，并保存为Shapefile"""
@@ -81,7 +102,7 @@ def extract_and_smooth_boundary(original_raster, segmented_raster, threshold, ou
     initial_boundary_intersect = "in_memory/initial_boundary_intersect"
     arcpy.Intersect_analysis([region1_boundary, region2_boundary], initial_boundary_intersect, "ALL", "", "LINE")
 
-    # 提取自然间断点处的等值线
+    # 提取threshold处的等值线
     contour_lines = "in_memory/contour_lines"
     arcpy.ddd.ContourList(original_raster, contour_lines, [threshold])
 
@@ -106,12 +127,13 @@ def extract_and_smooth_boundary(original_raster, segmented_raster, threshold, ou
 def generate_natural_boundary(input_raster, break_value, output_boundary_shapefile):
     """根据输入的栅格和间断值生成自然地理界限"""
     segmented_raster_path = "in_memory/segmented_raster"
-    
-    # 执行阈值分割
+
     result_array = threshold_segmentation(input_raster, break_value)
-    
-    # 保存分割结果为中间栅格
-    save_raster(result_array, input_raster, segmented_raster_path)
+
+    # 将 NaN → 0，再转为 uint8（1/2 为两侧最大连通体，0 为 NoData/背景）
+    mask_uint8 = np.nan_to_num(result_array, nan=0).astype('uint8')
+    save_raster(mask_uint8, input_raster, segmented_raster_path)
+
     
     # 提取并平滑自然地理界线
     extract_and_smooth_boundary(input_raster, segmented_raster_path, break_value, output_boundary_shapefile)

@@ -1,3 +1,4 @@
+#(V 3.20 updated)
 import os
 import arcpy
 from arcpy.sa import *
@@ -27,6 +28,9 @@ class Geodetector:
         self.q_cache = {}  # Q 结果缓存
         self.raster_statistics_cache = {}  # 栅格统计缓存
         self.overall_variance, self.total_count = self.calculate_overall_statistics()  # 计算总体统计数据
+        
+        # V 3.20 updated log: add this line
+        self.q_sample_stats = {}  # per-X sample stats: {cache_key: (var_y_given_X, N_X_intersect_Y)}
 
     def convert_raster_to_numpy(self, raster, raster_name=None):
         """
@@ -189,15 +193,20 @@ class Geodetector:
 
         return y_variance, y_count
 
-    def calculate_q_statistic(self, variances, pixel_counts):
-        # 计算组内平方和（SSW）
+    def calculate_q_statistic(self, variances, pixel_counts, total_count, overall_variance):
+        """
+        计算 Q 统计量，分母采用“当前样本集”的 N 与 Var(Y)：
+            q = 1 - SSW / (N * Var(Y | current sample))
+        """
+        # 组内平方和
         SSW = sum(N_h * var_h for N_h, var_h in zip(pixel_counts, variances))
 
-        # 计算 Q 统计量
-        if self.total_count * self.overall_variance == 0:
-            return 0  # 避免除以零
-        q = 1 - SSW / (self.total_count * self.overall_variance)
+        denom = total_count * overall_variance
+        if denom == 0 or np.isnan(denom):
+            return 0  # 避免除以零/无效
+        q = 1 - SSW / denom
         return q
+
 
     def calculate_q(self, x_path=None, x_raster=None, cache_key=None):
         if cache_key is None:
@@ -214,24 +223,38 @@ class Geodetector:
                 logging.error(f"无法加载栅格 {x_path}: {e}")
                 return None
 
-        unique_values, y_values, x_values = self.get_raster_statistics(x_raster_path=x_path, x_raster=x_raster, cache_key=cache_key)
-
+        unique_values, y_values, x_values = self.get_raster_statistics(
+            x_raster_path=x_path, x_raster=x_raster, cache_key=cache_key
+        )
         if unique_values is None:
             logging.warning(f"栅格 {x_path} 缺少有效数据，跳过。")
             return None
 
-        variances, means, pixel_counts = self.process_strata(unique_values, y_values, x_values)
+        # --- 核心升级：基于“当前样本 X∩Y”计算 Var(Y) 与 N ---
+        y_std = np.nanstd(y_values, ddof=1)
+        y_var_sample = 0.0 if np.isnan(y_std) else (y_std ** 2)
+        N_sample = np.count_nonzero(~np.isnan(y_values))
 
+        variances, means, pixel_counts = self.process_strata(unique_values, y_values, x_values)
         if variances is None or means is None or pixel_counts is None:
             logging.warning(f"栅格 {x_path} 的层级缺少有效数据，跳过。")
             return None
 
-        q = self.calculate_q_statistic(variances, pixel_counts)
+        q = self.calculate_q_statistic(
+            variances, pixel_counts,
+            total_count=N_sample,
+            overall_variance=y_var_sample
+        )
 
         result = (q, unique_values, means, variances, pixel_counts)
         self.q_cache[cache_key] = result
+
+        # 记下该 X 的样本口径 Var/N，供后续输出和显著性计算使用
+        self.q_sample_stats[cache_key] = (y_var_sample, N_sample)
+
         logging.info(f"Calculated Q for {cache_key}: Q={q}")
         return result
+
 
     def calculate_q_for_list(self):
         """串行计算所有栅格的 Q 值，无需过滤。"""
@@ -243,8 +266,19 @@ class Geodetector:
             if result is None:
                 logging.warning(f"栅格 {x_path} 的 Q 统计量计算失败，跳过。")
                 continue
+
             q, unique_values, means, variances, pixel_counts = result
-            lambda_value, f_critical, is_significant = self.calculate_q_significance(q)
+
+            # 使用“当前样本口径”的 N 与 Var(Y)（来自第3步缓存）
+            y_var_sample, N_sample = self.q_sample_stats.get(
+                x_path, (self.overall_variance, self.total_count)
+            )
+
+            # 显著性也基于本次样本大小 N_sample（其余保持现状）
+            lambda_value, f_critical, is_significant = self.calculate_q_significance(
+                q, N=N_sample
+            )
+
             self.q_results.append({
                 'Raster': x_path,
                 'Q_statistic': q,
@@ -255,12 +289,15 @@ class Geodetector:
                 'Means': means,
                 'Variances': variances,
                 'Pixel_counts': pixel_counts,
-                'Overall_variance': self.overall_variance,
-                'Total_count': self.total_count
+                # >>> 输出口径升级：样本口径 <<<
+                'Overall_variance': y_var_sample,
+                'Total_count': N_sample
             })
+
             logging.info(f"栅格: {x_path} - Q 统计量: {q}, 显著: {is_significant}")
 
         logging.info("完成 Q 统计量的串行计算。")
+
 
     def filter_q_results(self):
         """根据模式过滤 Q 结果，仅在 qmax 模式下。"""
@@ -285,22 +322,33 @@ class Geodetector:
             self.filtered_q_results = filtered
             logging.info(f"在 'all' 模式下，过滤后得到 {len(self.filtered_q_results)} 个结果。")
 
-    def calculate_q_significance(self, q, alpha=None):
+    def calculate_q_significance(self, q, alpha=None, N=None, L=None):
+        """
+        计算 q 的显著性。为尽量少改动：
+        - 若传入 N，则使用该 N（样本口径）；否则退回旧逻辑 self.total_count。
+        - L 默认仍按旧逻辑使用 len(self.raster_list)（不在此次补丁范围内改动）。
+        """
         if alpha is None:
             alpha = self.alpha
-        N = self.total_count
-        L = len(self.raster_list)
+        if N is None:
+            N = self.total_count
+        if L is None:
+            L = len(self.raster_list)
+
         if (1 - q) == 0:
             lambda_value = np.inf
         else:
             lambda_value = q * (N - 1) / (1 - q)
+
         try:
             f_critical = stats.f.ppf(1 - alpha, L - 1, N - L)
         except Exception as e:
             logging.error(f"计算 F 临界值时出错: {e}")
             f_critical = np.inf  # 避免因自由度不合法导致错误
+
         is_significant = lambda_value > f_critical
         return lambda_value, f_critical, is_significant
+
 
     def create_intersection_raster(self, x1_raster, x2_raster):
         try:

@@ -1,10 +1,14 @@
 import rasterio
 import numpy as np
+#import matplotlib.pyplot as plt
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator        # small：减少主刻度数量
+from matplotlib.patches import Patch             # 风险色块图例
+
 from scipy.interpolate import make_interp_spline
 import pandas as pd
-from matplotlib.patches import Patch
-from rasterio.transform import from_origin
+#from matplotlib.patches import Patch
+#from rasterio.transform import from_origin
 import os
 
 def advanced_risk_detector(
@@ -19,7 +23,8 @@ def advanced_risk_detector(
     macd_short_period=12,          # MACD短期EMA窗口 (C5)
     macd_long_period=26,           # MACD长期EMA窗口 (C6)
     macd_signal_period=9,          # MACD信号线EMA窗口 (C7)
-    k_factor=1.0                   # 风险分类阈值系数 (k)，默认=1
+    k_factor=1.0,                   # 风险分类阈值系数 (k)，默认=1
+    layout=["large"]               # 新增参数：版式，支持 ["large"] 或 ["small"]
 ):
     """
     以栅格 rasX (环境因子) 与 rasY (生态或环境属性) 为输入，使用Advanced Risk Detector方法
@@ -29,8 +34,8 @@ def advanced_risk_detector(
       3) 计算10-bin与20-bin SMA（可自定义）
       4) 计算MACD指标 (12, 26, 9)（可自定义）
       5) 动态阈值风险分类：High / Medium / Low
-         - High Risk:   MACD > Signal + k_factor * threshold
-         - Low Risk:    MACD < Signal - k_factor * threshold
+         - High Risk:   abs(MACD - Signal) >  + k_factor * threshold
+         - Low Risk:    abs(MACD - Signal) < - k_factor * threshold
          - Medium Risk: 其余
       6) 输出 Risk_Value 和 Risk_Level 栅格文件
     
@@ -157,28 +162,29 @@ def advanced_risk_detector(
 
     macd_line, signal_line, histogram = calculate_macd(y_means, macd_short_period, macd_long_period, macd_signal_period)
 
-    # =============== 动态阈值划分风险 ===============
-    # 计算加权均值，权重为每个bin的样本数
+    # =============== 动态阈值划分风险（绝对偏离；与 SM1 S1-13 对齐） ===============
+    # 阈值 τ：仍按当前实现，用 MACD 直方图的加权均值的绝对值
     valid_hist_mask = ~np.isnan(histogram)
-    weighted_sum = np.nansum(histogram[valid_hist_mask] * sample_counts[valid_hist_mask])
-    total_weights = np.nansum(sample_counts[valid_hist_mask])
-    if total_weights > 0:
-        hist_mean = weighted_sum / total_weights
-    else:
-        hist_mean = 0  # 如果没有有效样本，则设为0
-    threshold = abs(hist_mean)
-
-    # 风险分类：High、Medium、Low
+    weighted_sum   = np.nansum(histogram[valid_hist_mask] * sample_counts[valid_hist_mask])
+    total_weights  = np.nansum(sample_counts[valid_hist_mask])
+    hist_mean      = (weighted_sum / total_weights) if total_weights > 0 else 0.0
+    threshold      = abs(hist_mean)  # τ >= 0
+    
+    # 用“绝对偏离”分级，保证与 Risk_Value = |MACD - Signal| 单调一致
+    delta        = macd_line - signal_line
+    abs_delta    = np.abs(delta)
+    
     risk_levels = []
-    for m, s in zip(macd_line, signal_line):
-        if np.isnan(m) or np.isnan(s):
+    for ad, m, s in zip(abs_delta, macd_line, signal_line):
+        if np.isnan(ad) or np.isnan(m) or np.isnan(s):
             risk_levels.append('No Data')
-        elif m > s + k_factor * threshold:
-            risk_levels.append('High Risk')
-        elif m < s - k_factor * threshold:
-            risk_levels.append('Low Risk')
+        elif ad >= (k_factor * threshold):
+            risk_levels.append('High Risk')      # 3
+        elif ad > threshold:
+            risk_levels.append('Medium Risk')    # 2
         else:
-            risk_levels.append('Medium Risk')
+            risk_levels.append('Low Risk')       # 1
+
 
     # =============== 将结果汇总为DataFrame ===============
     risk_df = pd.DataFrame({
@@ -267,61 +273,190 @@ def advanced_risk_detector(
         dst.write(rasRisk_level, 1)
 
     # =============== 绘图 ===============
-    fig, ax1 = plt.subplots(figsize=(19.2, 10.8))  # 设置为1080p
 
-    # 平滑均值曲线
-    ax1.plot(x_smooth, y_smooth, label="Mean", color='blue', lw=2)
-    # 布林带
-    if len(x_smooth) == len(upper_band_smooth):
-        ax1.fill_between(x_smooth, lower_band_smooth, upper_band_smooth, color='gray', alpha=0.3, label=f"Mean ±{std_factor}σ")
-    # SMA
-    ax1.plot(bin_centers, sma_short, label=f"SMA {sma_short_bins}-Bin", color='orange', lw=2, linestyle='--')
-    ax1.plot(bin_centers, sma_long, label=f"SMA {sma_long_bins}-Bin", color='purple', lw=2, linestyle='--')
+    # --- 版式参数校验（允许同时包含 'large' 与 'small'）---
+    _layout = layout if 'layout' in locals() else ["large"]
+    if _layout is None:
+        _layout = ["large"]
+    if isinstance(_layout, str):
+        _layout = [_layout]
 
-    ax1.set_title(f"Advanced Risk Detector\nX vs Y with {num_bins} Bins\n(std_factor={std_factor}, k_factor={k_factor})", fontsize=16)
-    ax1.set_xlabel("X (explanatory variable)", fontsize=14)
-    ax1.set_ylabel("Y (dependent variable)", fontsize=14)
-    ax1.legend(loc='upper left', fontsize=12)
-    ax1.grid(True)
+    if not isinstance(_layout, (list, tuple)):
+        raise ValueError(
+            "参数 layout 必须是列表或元组，例如 ['large'] 或 ['small']。\n"
+            "The 'layout' parameter must be a list or tuple, e.g., ['large'] or ['small']."
+        )
+    valid_flags = {'small', 'large'}
+    unknown = [x for x in _layout if x not in valid_flags]
+    if unknown:
+        raise ValueError(
+            f"layout 含未识别选项：{unknown}。可选：'small' 或 'large'。\n"
+            f"Unrecognized layout option(s): {unknown}. Allowed values are 'small' or 'large'."
+        )
+    # 固定渲染顺序，避免输出顺序不稳定
+    modes = [m for m in ('large', 'small') if m in _layout]
+    if not modes:
+        modes = ['large']
 
-    # 第二个y轴，绘制MACD线
-    ax2 = ax1.twinx()
-    ax2.plot(bin_centers, macd_line, label="MACD", color='green', lw=2)
-    ax2.plot(bin_centers, signal_line, label="Signal", color='red', lw=2)
-    bar_width = (bins[1] - bins[0]) * 0.6 if len(bins) > 1 else 0.01
-    ax2.bar(bin_centers, histogram, width=bar_width, alpha=0.3, color='gray', label="MACD Histogram")
-    ax2.set_ylabel("MACD", fontsize=14)
-    ax2.legend(loc='upper right', fontsize=12)
+    # 逐一渲染所需版式；注意：函数将返回“最后一张”图对象 fig（保持原有返回签名）
+    for _mode in modes:
+        is_small = (_mode == 'small')
+        is_large = not is_small
 
-    # 风险区间着色
-    for i in range(num_bins):
-        x = bin_centers[i]
-        risk = risk_levels[i]
-        left_edge = x - (bins[1] - bins[0]) / 2
-        right_edge = x + (bins[1] - bins[0]) / 2
-        if risk == 'High Risk':
-            ax1.axvspan(left_edge, right_edge, color='red', alpha=0.1)
-        elif risk == 'Low Risk':
-            ax1.axvspan(left_edge, right_edge, color='green', alpha=0.1)
-        elif risk == 'Medium Risk':
-            ax1.axvspan(left_edge, right_edge, color='yellow', alpha=0.1)
+        # ——版式尺寸与字体——
+        if is_small:
+            # A4 竖向宽度 ~8.27 in；小尺寸取一半宽度，便于两图并排拼接
+            A4_WIDTH_IN = 8.27
+            fig_w = A4_WIDTH_IN / 2.0       # ~4.135 in
+            fig_h = fig_w * 0.62            # ~2.56 in，紧凑纵横比
+            label_fs = 8
+            tick_fs  = 7
+            legend_fs = 7
+            show_title = False               # 小尺寸去标题
+            rotate_ticks = True              # 刻度竖排
         else:
-            pass  # 'No Data' 不着色
+            # 保持原始 1080p 风格
+            fig_w, fig_h = 19.2, 10.8
+            label_fs = 14
+            tick_fs  = None                  # 沿用 matplotlib 默认
+            legend_fs = 12
+            show_title = True
+            rotate_ticks = False
 
-    # 手动添加风险分类图例
-    risk_patches = [
-        Patch(facecolor='red', edgecolor='red', alpha=0.1, label='High Risk'),
-        Patch(facecolor='yellow', edgecolor='yellow', alpha=0.1, label='Medium Risk'),
-        Patch(facecolor='green', edgecolor='green', alpha=0.1, label='Low Risk')
-    ]
+        # --- 建图 ---
+        fig, ax1 = plt.subplots(figsize=(fig_w, fig_h))  # 尺寸随版式变化
 
-    # 更新图例，包含风险等级说明
-    current_handles, current_labels = ax1.get_legend_handles_labels()
-    ax1.legend(handles=current_handles + risk_patches, loc='upper left', fontsize=12)
+        # 平滑均值曲线
+        ax1.plot(x_smooth, y_smooth, label="Mean", color='blue', lw=2)
 
-    plt.tight_layout()
+        # 布林带
+        if len(x_smooth) == len(upper_band_smooth):
+            ax1.fill_between(
+                x_smooth, lower_band_smooth, upper_band_smooth,
+                color='gray', alpha=0.3, label=f"Mean ±{std_factor}σ"
+            )
 
+        # SMA
+        ax1.plot(
+            bin_centers, sma_short,
+            label=f"SMA {sma_short_bins}-Bin", color='orange', lw=2, linestyle='--'
+        )
+        ax1.plot(
+            bin_centers, sma_long,
+            label=f"SMA {sma_long_bins}-Bin", color='purple', lw=2, linestyle='--'
+        )
+
+        # 标题（小尺寸不显示）
+        if show_title:
+            ax1.set_title(
+                f"Advanced Risk Detector\nX vs Y with {num_bins} Bins\n"
+                f"(std_factor={std_factor}, k_factor={k_factor})",
+                fontsize=max(label_fs, 16)
+            )
+
+        # 坐标轴标签
+        ax1.set_xlabel("X (explanatory variable)", fontsize=label_fs)
+        ax1.set_ylabel("Y (dependent variable)", fontsize=label_fs)
+
+        # small：减少主刻度数量（更简洁）
+        if is_small:
+            ax1.xaxis.set_major_locator(MaxNLocator(nbins=5))   # X ≤ 5 主刻度
+            ax1.yaxis.set_major_locator(MaxNLocator(nbins=4))   # 左 Y ≤ 4 主刻度
+
+        # 左侧图例（仅 large 在轴内显示）
+        if is_large:
+            ax1.legend(loc='upper left', fontsize=legend_fs)
+
+        # 第二个y轴，绘制 MACD
+        ax2 = ax1.twinx()
+        ax2.plot(bin_centers, macd_line,   label="MACD",   color='green', lw=2)
+        ax2.plot(bin_centers, signal_line, label="Signal", color='red',   lw=2)
+        bar_width = (bins[1] - bins[0]) * 0.6 if len(bins) > 1 else 0.01
+        ax2.bar(bin_centers, histogram, width=bar_width, alpha=0.3, color='gray', label="MACD Histogram")
+        ax2.set_ylabel("MACD", fontsize=label_fs)
+
+        # ——Y 轴自动科学计数法（左右轴都开启；当量级足够小/大时自动切换）
+        ax1.ticklabel_format(axis='y', style='sci', scilimits=(0,0), useMathText=True)
+        ax2.ticklabel_format(axis='y', style='sci', scilimits=(0,0), useMathText=True)
+
+
+        # 右轴少刻度（仅 small）
+        if is_small:
+            ax2.yaxis.set_major_locator(MaxNLocator(nbins=4))
+        # 右侧图例（仅 large 在轴内显示）
+        if is_large:
+            ax2.legend(loc='upper right', fontsize=legend_fs)
+
+        # 风险区间着色
+        for i in range(num_bins):
+            x_bin_center = bin_centers[i]
+            risk = risk_levels[i]
+            left_edge  = x_bin_center - (bins[1] - bins[0]) / 2
+            right_edge = x_bin_center + (bins[1] - bins[0]) / 2
+            if risk == 'High Risk':
+                ax1.axvspan(left_edge, right_edge, color='red',   alpha=0.1)
+            elif risk == 'Medium Risk':
+                ax1.axvspan(left_edge, right_edge, color='yellow', alpha=0.1)
+            elif risk == 'Low Risk':
+                ax1.axvspan(left_edge, right_edge, color='green',  alpha=0.1)
+            else:
+                pass  # 'No Data'
+
+        # 风险图例
+        risk_patches = [
+            Patch(facecolor='red',    edgecolor='red',    alpha=0.1, label='High Risk'),
+            Patch(facecolor='yellow', edgecolor='yellow', alpha=0.1, label='Medium Risk'),
+            Patch(facecolor='green',  edgecolor='green',  alpha=0.1, label='Low Risk')
+        ]
+        current_handles, current_labels = ax1.get_legend_handles_labels()
+        if is_large:
+            ax1.legend(handles=current_handles + risk_patches, loc='upper left', fontsize=legend_fs)
+
+        # ——small：刻度竖排 & 统一刻度字号 + 底部双行图例——
+        if is_small:
+            if tick_fs is not None:
+                ax1.tick_params(axis='both', labelsize=tick_fs)
+                ax2.tick_params(axis='y',    labelsize=tick_fs)
+            for t in ax1.get_xticklabels():
+                #t.set_rotation(90)
+                t.set_verticalalignment('center')
+                t.set_horizontalalignment('center')
+            for t in ax1.get_yticklabels():
+                t.set_rotation(90)
+                t.set_verticalalignment('center')
+                t.set_horizontalalignment('center')
+            for t in ax2.get_yticklabels():
+                t.set_rotation(90)
+                t.set_verticalalignment('center')
+                t.set_horizontalalignment('center')
+
+            # ——small：底部双行图例（在 x 轴标签的下一行）
+            h1, l1 = ax1.get_legend_handles_labels()
+            h2, l2 = ax2.get_legend_handles_labels()
+            all_handles = h1 + h2 + risk_patches
+            all_labels  = l1 + l2 + [p.get_label() for p in risk_patches]
+
+            # 为底部图例预留空间（rect 的下边距增大）
+            fig.tight_layout(rect=[0, 0.36, 1, 1])
+            fig.legend(
+                all_handles, all_labels,
+                loc='lower center', bbox_to_anchor=(0.5, 0.04),
+                ncol=4, fontsize=legend_fs, frameon=True
+            )
+
+        else:
+            # large：正常紧凑布局
+            plt.tight_layout()
+
+    # 注意：若 layout 同时包含 ["large", "small"]，本函数将返回最后一张图对象（例如 "small"）
     return risk_df, fig
+
+
+
+
+
+
+
 
 # ================= 使用示例 =================
 if __name__ == "__main__":
