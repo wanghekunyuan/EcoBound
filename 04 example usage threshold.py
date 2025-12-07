@@ -13,5 +13,7 @@ ecobound_threshold(
     b_bins = 30,        # Number of bins for second-layer evaluation (used for VR calculation)
     permutations = 0,   # Permutation test iterations (set to 0 to skip significance test)
     svg_only = True,
-    ecobound = True
+    ecobound = True,
+    x_original_folder= r".\input\X 1000m"
+    
 )

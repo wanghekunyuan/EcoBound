@@ -1,10 +1,65 @@
-# EcoBound v 3.16: A Complete Guide for GeoDetector, Ecological Risk Detection, and Natural Geographical Boundary Extraction (ArcGIS Pro Compatible)
+
+
+# EcoBound v 3.20: A Complete Guide for GeoDetector, Ecological Risk Detection, and Natural Geographical Boundary Extraction (ArcGIS Pro Compatible)
 
 This repository provides a complete implementation and usage guide for **GeoDetector-based ecological analysis**, powered by the **EcoBound toolkit**, a modular Python framework for ecological boundary extraction, threshold detection, and advanced risk mapping based on ArcGIS Pro.
 
 > 🗞 This README also serves as Supplementary Material 2 (SM2) of our manuscript.  
 >
 > ​        The mathematical foundations of EcoBound sees SM1 of our manuscript.
+
+
+
+## EcoBound v3.20 — Raster Alignment Update
+
+### What’s new
+
+- **New default alignment policy:** `align_policy="template_only"`.
+   Aligns all rasters to the template’s CRS, cell size, and pixel grid, and masks **only by the template’s valid area**.
+   NoData in one explanatory raster no longer propagates to the others.
+- **Legacy behavior preserved:** Use `align_policy="global_intersection"` to reproduce the previous “global NoData intersection” workflow.
+
+### Why it matters
+
+- **Retains more valid samples** for each explanatory raster (X), improving statistical power.
+- **Reduces spurious NoData influence** on downstream analyses.
+- **Fits GeoDetector’s per-analysis masking** (factor/interaction/ecology modules operate on the relevant variable(s) ∩ Y).
+
+### Backward compatibility
+
+- **No changes required** to runners, ArcGIS Script Tool UI, or example code.
+- Omitting the parameter uses the new default (`"template_only"`).
+- To reproduce older results, explicitly pass the legacy policy.
+
+### Usage
+
+```
+# Default (recommended): template-only masking
+aligned_files = align_rasters(
+    template=template,
+    raster_list=raster_list,
+    output_path=output_path,
+    continuous=continuous
+    # align_policy omitted → uses "template_only"
+)
+
+# Legacy behavior (not recommended for GeoDetector):
+aligned_files = align_rasters(
+    template=template,
+    raster_list=raster_list,
+    output_path=output_path,
+    continuous=continuous,
+    align_policy="global_intersection"
+)
+```
+
+### Performance
+
+- No significant overhead beyond standard resampling and snap operations.
+
+##### 
+
+
 
 
 
@@ -45,7 +100,20 @@ For details see the official help website of Esri:
 
 `rasterio` is not included in ArcGIS Pro by default and must be manually installed. Below is a tested procedure for installing `rasterio` in a cloned ArcGIS Pro environment (e.g., `arcgispro-py3-clone`) running Python 3.9.
 
-#### ✅ Step-by-Step Guide
+Starting from **ArcGIS Pro 3.2**, `rasterio` is available directly in the **Package Manager** and can be installed without manual downloads.
+
+#### ✅ Newer Versions (ArcGIS Pro ≥ 3.2)
+
+1. Open **ArcGIS Pro** → `Project` → `Package Manager`.  
+2. Select your cloned environment (e.g., `arcgispro-py3-clone`).  
+3. Type **rasterio** in the search box.  
+4. Click **Install** on the right panel to complete installation.  
+
+<img src="./images\newrasterio.png" alt="Verify environment" style="zoom:50%;" />
+
+
+
+#### ✅ Step-by-Step Guide for ⚠️ Older Versions (ArcGIS Pro ≤ 3.1)
 
 1. **Open Command Prompt and set temporary directories** *(required for path safety)*:
 
@@ -64,7 +132,6 @@ set TMP=C:\Temp
 cd "C:\Program Files\ArcGIS\Pro\bin\Python\Scripts"
 activate.bat
 conda activate arcgispro-py3-clone  # Replace with your environment name defined in Step 1
-call conda.bat activate arcgispro-py3-clone # For the newest ArcGIS pro v 3.5, Replace with your environment name defined in Step 1
 ```
 
 > ✅ This method has been fully tested and confirmed to work on Windows 10 with ArcGIS Pro 3.2 using the default cloned environment (`arcgispro-py3-clone`).
@@ -209,7 +276,7 @@ For users who prefer working in the graphical interface of ArcGIS Pro, EcoBound 
    - `Advanced Risk Detector`
 
    Click to open any tool and fill in the parameters using the GUI.
-
+   
    ![open toolbox model](.\images\open toolbox model.png)
 
 > ✅ This mode is ideal for GIS analysts who prefer visual workflows without writing code.
@@ -436,14 +503,13 @@ In the toolbox `Ecobound.atbx`, use the tool **Raster Alignment**.
 
 - Aligned raster layers saved in the specified output folder
 - File names and formats are preserved (e.g., `GDP.tif`, `NDVI.tif`, `LST.tif`)
-
 > ✅ This prepares input data for further analysis such as trend detection and GeoDetector. Recommended as the **first step** in any workflow using heterogeneous raster datasets.
 
 ---
 
 ### 🧪 GeoDetector Analysis
 
-Performs geographical detection of explanatory variables for a target ecological indicator using spatial stratification. The mathematical foundation of all calculations is fully consistent with the original GeoDetector framework (see [Wang et al., 2020](https://doi.org/10.1080/15481603.2020.1760434)).
+Performs geographical detection of explanatory variables for a target ecological indicator using spatial stratification. The mathematical foundation of all calculations is fully consistent with the original GeoDetector framework (see [Song et al., 2020](https://doi.org/10.1080/15481603.2020.1760434)).
 
 Included modules: **Factor Detector**, **Interaction Detector**, **Risk Detector**, and **Ecological Detector**.
 
@@ -459,7 +525,7 @@ Included modules: **Factor Detector**, **Interaction Detector**, **Risk Detector
 | `slice_types`      | `list`  | ✅ Yes    | List of discretization methods (e.g., `["EQUAL_INTERVAL", "EQUAL_AREA", "NATURAL_BREAKS", "GEOMETRIC_INTERVAL"]`). |
 | `number_zones`     | `list`  | ✅ Yes    | List of class break numbers for stratification (e.g., `[3, 4, 5]`). |
 | `mode`             | `str`   | ✅ Yes    | Detection mode: `"qmax"` selects the stratification with the highest q value for each variable. `"all"` keeps all significant slice results.  <br/>> ⚠️ `mode="all"` may generate dozens of outputs per variable by retaining all statistically significant stratifications.  <br/>> For clarity and reproducibility, we recommend using the default `"qmax"` mode, which selects only the most explanatory result for each factor. |
-| `alpha`            | `float` | ✅ Yes    | Significance level for q-statistic filtering (commonly set to `0.05`). |
+| `alpha`            | `float` | ✅ Yes    | The significance threshold (default `0.05`) in the F-test for q-statistic. |
 | `modules`          | `list`  | ✅ Yes    | List of modules to run: `["factor", "interaction", "risk", "eco"]`.<br/><br/>> 📌 Module reference:  <br/>> - `"factor"` → **Factor Detector** (required)  <br/>> - `"interaction"` → **Interaction Detector**  <br/>> - `"risk"` → **Risk Detector**  <br/>> - `"eco"` → **Ecological Detector**<br/><br/>> ⚠️ `"factor"` is mandatory for all workflows and cannot be excluded. |
 
 ---
@@ -514,7 +580,7 @@ From the toolbox `Ecobound.atbx`, choose the **GeoDetector Analysis** tool.
 3. Choose slicing method(s) and number of classes
 4. Set significance threshold (`alpha`)
 5. Select modules to run
-   ![GEODECTOR tool box mod](.\images\GEODECTOR tool box mod.png)
+![GEODECTOR tool box mod](.\images\GEODECTOR tool box mod.png)
 
 ---
 
@@ -531,12 +597,11 @@ From the toolbox `Ecobound.atbx`, choose the **GeoDetector Analysis** tool.
 
 This module detects dynamic ecological risk regions using an adapted MACD (Moving Average Convergence Divergence) model combined with Bollinger Band logic.  
 It is designed for tracking shifts in ecological indicator fluctuations over stratified classes of explanatory variables.
-
 > ✅ Designed for adaptive risk zoning based on indicator dynamics across environmental gradients.
-
 ---
 
-#### 🔧 Parameters
+#### 🔧 
+Parameters
 
 | Parameter            | Type    | Required | Description                                                  |
 | -------------------- | ------- | -------- | ------------------------------------------------------------ |
@@ -552,6 +617,13 @@ It is designed for tracking shifts in ecological indicator fluctuations over str
 | `macd_signal_period` | `int`   | ✅ Yes    | C7: MACD signal line period (default: 9).                    |
 | `k_factor`           | `float` | ✅ Yes    | Threshold factor for Risk Level classification (default: 1.0). |
 | `svg_only`           | bool    | ✅ Yes    | Whether to export only SVG plots (default: True). Set to False to export both `.svg` and `.png`. |
+| `layout`              | `list[str]` | Optional | Figure layout(s): `["large"]`, `["small"]`, or `["large","small"]`. Small is half A4 width with rotated tick labels and a bottom legend; large keeps the original style. Default: `["large"]`. |
+| `compute_geri`        | `bool`      | Optional | Enable synthesis of the Global Ecological Risk Index (GERI). Default: `False`. |
+| `qmax_csv`            | `str`       | Optional | Path to GeoDetector output **`filtered_q_results.csv`**. If you don’t have it, you may hand-create a CSV with columns: **`Base_X`** (must match `<Base_X>_risk.tif`), **`Q_statistic`** (float), and optional **`Significant`** (True/False). Used only when `compute_geri=True`. |
+| `risk_norm_quantile`  | `float`     | Optional | Per-layer robust normalization percentile `p` for Risk\* (recommended **0.98**). Default: `0.98`. |
+| `sig_filter`          | `bool`      | Optional | If `True`, only rows with `Significant=True` in Qmax are used. Default: `True`. |
+| `export_sidecars`     | `bool`      | Optional | Export diagnostic files for GERI (thresholds and used-layer list). Default: `True`. |
+
 
 ---
 
@@ -560,11 +632,15 @@ It is designed for tracking shifts in ecological indicator fluctuations over str
 ```
 EcoBound Python Package/
 ├── output/
-│   ├── X_alignment/               # Input X rasters (aligned)
-│   ├── Barren_testout/           # Input Y raster: Sens_Slope.tif
-│   └── adv_risk/                 # Output from advanced risk detector
-└── 03 example usage adv risk.py  # Code sample
+│   ├── X_alignment/                # Input X rasters (aligned)
+│   ├── Barren_testout/             # Input Y raster: Sens_Slope.tif
+│   ├── geodetector/                # Input for GERI (Qmax from GeoDetector)
+│   │   └── filtered_q_results.csv  # <- qmax_csv (Base_X, Q_statistic, [Significant])
+│   └── adv_risk/                   # Outputs from Advanced Risk Detector & GERI
+└── 03 example usage adv risk.py    # Code sample
 ```
+
+Note: `qmax_csv` is the output of the GeoDector Analysis.  Required **only** when `Compute GERI = True`.
 
 ---
 
@@ -577,7 +653,7 @@ import arcpy
 # 0 Set environment
 arcpy.env.overwriteOutput = True
 
-# 1 Run advanced risk detector
+# 1 Run Advanced Risk Detector (+ optional GERI)
 adv_risk(
     x_folder = r".\output\X_alignment",
     y_raster = r".\output\Barren_testout\Sens_Slope.tif",
@@ -590,8 +666,17 @@ adv_risk(
     macd_long_period = 26,
     macd_signal_period = 9,
     k_factor = 1.0,
-    svg_only = True
+    layout = ["large","small"],   # export both layouts; use ["large"] or ["small"] if you prefer one
+    svg_only = True,
+
+    # --- Optional GERI synthesis ---
+    compute_geri = True,          # turn on to generate GERI rasters
+    qmax_csv = r".\output\geodetector\filtered_q_results.csv",  # or a hand-made CSV (see notes below)
+    risk_norm_quantile = 0.98,    # robust per-layer normalization (p98)
+    sig_filter = True,            # use only rows with Significant=True
+    export_sidecars = True        # also export thresholds & used-layers CSVs
 )
+
 ```
 
 ---
@@ -617,6 +702,31 @@ From the toolbox `Ecobound.atbx`, select **Advanced Risk Detector**.
 - `adv_risk/*_Risk_Value.tif`: Continuous raster of MACD-based ecological risk values.
 - `adv_risk/*_Risk_Level.tif`: Classified raster of risk levels based on the threshold factor (`k_factor`).
 - `adv_risk/*_Risk.svg`: Visual diagram showing MACD curve, signal line, Bollinger bands, and detected thresholds.
+- `adv_risk/GERI.tif`: Global Ecological Risk Index (0–1), pixel-wise weighted average of normalized risks.
+- `adv_risk/GERI_valid_count.tif`: Number of contributing layers per pixel.
+- `adv_risk/GERI_effective_weight.tif`: Sum of effective weights `Σ q_j` per pixel.
+- `adv_risk/GERI_risk_norm_thresholds.csv`: Per-layer robust thresholds used for normalization (e.g., p98).
+- `adv_risk/GERI_used_layers.csv`: Layers included in GERI with their `Base_X`, raster path, `q`, and significance flag.
+
+##### Qmax CSV (`qmax_csv`) — what to provide
+
+- **Use** the GeoDetector output file **`filtered_q_results.csv`**; or  
+- **Hand-create** a UTF-8 CSV with:
+  - `Base_X` — standardized X name matching the risk raster stem **`<Base_X>_risk.tif`**
+  - `Q_statistic` — weight (float)
+  - `Significant` — optional; `True/False` (used when the “Significant only” switch is on)
+
+**Mini example**
+
+```csv
+Base_X,Q_statistic,Significant
+Slope,0.214,True
+NDVI,0.367,True
+Temperature,0.081,False
+```
+
+Unmatched names are skipped safely. Duplicates keep the **first** row. Missing `Q_statistic` rows are ignored.
+
 
 ---
 
