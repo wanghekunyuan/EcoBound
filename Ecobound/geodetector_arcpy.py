@@ -35,37 +35,38 @@ class Geodetector:
     def convert_raster_to_numpy(self, raster, raster_name=None):
         """
         将栅格转换为 NumPy 数组，并处理 NoData 值。
-
-        Parameters:
-            raster (arcpy.Raster): 要转换的栅格对象。
-            raster_name (str): 栅格名称，用于日志记录。
-
-        Returns:
-            tuple: (NumPy 数组, 掩蔽数组)
+        关键修复：避免 np.isnan(None) 导致交互探测全部失败。
         """
         desc = arcpy.Describe(raster)
         pixel_type = desc.pixelType
+
+        # 1) 先确定 nodata_value
         if pixel_type.startswith('F'):
+            # 浮点栅格：统一用 NaN 表示 NoData
             nodata_value = np.nan
         else:
             nodata = raster.noDataValue
             if nodata is not None:
                 nodata_value = nodata
             else:
-                logging.warning(f"栅格 {raster_name or 'Unknown'} 没有定义 NoData 值，假设所有数据有效。")
+                # 交互栅格（Combine 输出）经常 noDataValue=None，会触发原来的 np.isnan(None) 报错
+                logging.warning(f"栅格 {raster_name or 'Unknown'} 没有定义 NoData 值，将按无 NoData 处理（mask 全 True）。")
                 nodata_value = None
 
+        # 2) 转 numpy
         try:
+            # nodata_to_value 允许传 None（表示不替换），保持与你原始意图一致
             array = arcpy.RasterToNumPyArray(raster, nodata_to_value=nodata_value).astype(float)
         except Exception as e:
             logging.error(f"无法将栅格 {raster_name or 'Unknown'} 转换为 NumPy 数组: {e}")
             return None, None
 
-        if np.isnan(nodata_value):
+        # 3) 生成 mask（核心修复：对 None 不做 np.isnan）
+        if isinstance(nodata_value, (float, np.floating)) and np.isnan(nodata_value):
             mask = ~np.isnan(array)
         elif nodata_value is not None:
             mask = array != nodata_value
-            array[array == nodata_value] = np.nan  # 将 NoData 值设置为 NaN 以便后续处理
+            array[array == nodata_value] = np.nan
         else:
             mask = np.ones_like(array, dtype=bool)
 
