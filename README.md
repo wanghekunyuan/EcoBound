@@ -1,6 +1,6 @@
 
 
-# EcoBound v 3.21**EcoBound v3.21 — Bugfix Update**
+# **EcoBound v3.21 — Bugfix Update**
 
 What’s new  
 - Fix: Interaction Detector no longer fails when the raster has noDataValue=None (prevents `np.isnan(None)` crash).  
