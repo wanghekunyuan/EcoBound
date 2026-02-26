@@ -1,6 +1,10 @@
 
 
-# EcoBound v 3.20: A Complete Guide for GeoDetector, Ecological Risk Detection, and Natural Geographical Boundary Extraction (ArcGIS Pro Compatible)
+# EcoBound v 3.21**EcoBound v3.21 — Bugfix Update**
+
+What’s new  
+- Fix: Interaction Detector no longer fails when the raster has noDataValue=None (prevents `np.isnan(None)` crash).  
+- No change to q-statistic results when inputs are unchanged (behavior is identical for rasters with a defined NoData value).: A Complete Guide for GeoDetector, Ecological Risk Detection, and Natural Geographical Boundary Extraction (ArcGIS Pro Compatible)
 
 This repository provides a complete implementation and usage guide for **GeoDetector-based ecological analysis**, powered by the **EcoBound toolkit**, a modular Python framework for ecological boundary extraction, threshold detection, and advanced risk mapping based on ArcGIS Pro.
 
