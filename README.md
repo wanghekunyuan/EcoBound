@@ -1,72 +1,19 @@
-
-
-# **EcoBound v3.21 — Bugfix Update**
+# **EcoBound v3.22 — Trend026 Hotfix Update**
 
 What’s new  
-- Fix: Interaction Detector no longer fails when the raster has noDataValue=None (prevents `np.isnan(None)` crash).  
-- No change to q-statistic results when inputs are unchanged (behavior is identical for rasters with a defined NoData value).: A Complete Guide for GeoDetector, Ecological Risk Detection, and Natural Geographical Boundary Extraction (ArcGIS Pro Compatible)
+- **Fix (ArcGIS Pro Basic compatible):** Trend026 now supports ArcGIS Pro **Basic**. When Mosaic Dataset tools are unavailable, it automatically falls back to  
+  **CompositeBands → RasterToNetCDF → GenerateTrendRaster** (Standard/Advanced will still use the Mosaic workflow when available).
+- **Time dimension:** Uses the **4-digit number parsed from filenames** as `ZOrder` to build the temporal sequence (e.g., 2000–2024). Missing intervals are allowed.
+- **Consistency:** Trend outputs (**Sen’s slope** and **Mann–Kendall Z-score**) remain consistent with the original workflow for the same inputs.
+- **Also included:** Interaction Detector no longer fails when the raster has `noDataValue=None`.
+
+**A Complete Guide for GeoDetector, Ecological Risk Detection, and Natural Geographical Boundary Extraction (ArcGIS Pro Compatible)**
 
 This repository provides a complete implementation and usage guide for **GeoDetector-based ecological analysis**, powered by the **EcoBound toolkit**, a modular Python framework for ecological boundary extraction, threshold detection, and advanced risk mapping based on ArcGIS Pro.
 
 > 🗞 This README also serves as Supplementary Material 2 (SM2) of our manuscript.  
 >
-> ​        The mathematical foundations of EcoBound sees SM1 of our manuscript.
-
-
-
-## EcoBound v3.20 — Raster Alignment Update
-
-### What’s new
-
-- **New default alignment policy:** `align_policy="template_only"`.
-   Aligns all rasters to the template’s CRS, cell size, and pixel grid, and masks **only by the template’s valid area**.
-   NoData in one explanatory raster no longer propagates to the others.
-- **Legacy behavior preserved:** Use `align_policy="global_intersection"` to reproduce the previous “global NoData intersection” workflow.
-
-### Why it matters
-
-- **Retains more valid samples** for each explanatory raster (X), improving statistical power.
-- **Reduces spurious NoData influence** on downstream analyses.
-- **Fits GeoDetector’s per-analysis masking** (factor/interaction/ecology modules operate on the relevant variable(s) ∩ Y).
-
-### Backward compatibility
-
-- **No changes required** to runners, ArcGIS Script Tool UI, or example code.
-- Omitting the parameter uses the new default (`"template_only"`).
-- To reproduce older results, explicitly pass the legacy policy.
-
-### Usage
-
-```
-# Default (recommended): template-only masking
-aligned_files = align_rasters(
-    template=template,
-    raster_list=raster_list,
-    output_path=output_path,
-    continuous=continuous
-    # align_policy omitted → uses "template_only"
-)
-
-# Legacy behavior (not recommended for GeoDetector):
-aligned_files = align_rasters(
-    template=template,
-    raster_list=raster_list,
-    output_path=output_path,
-    continuous=continuous,
-    align_policy="global_intersection"
-)
-```
-
-### Performance
-
-- No significant overhead beyond standard resampling and snap operations.
-
-##### 
-
-
-
-
-
+> The mathematical foundations of EcoBound are provided in SM1 of our manuscript.
 ---
 
 ## 📦 Installation
