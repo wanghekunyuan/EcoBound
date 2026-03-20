@@ -84,8 +84,11 @@ def trend_analysis(
         try:
             if arcpy.Exists(path_):
                 arcpy.management.Delete(path_)
-            elif os.path.exists(path_):
+            elif os.path.isfile(path_):
                 os.remove(path_)
+            elif os.path.isdir(path_):
+                import shutil
+                shutil.rmtree(path_, ignore_errors=True)
         except:
             pass
 
@@ -191,15 +194,14 @@ def trend_analysis(
         return out_netcdf
 
     try:
-        notify("   → Trying Mosaic Dataset workflow...")
         md_input = _try_build_mosaic_md()
         md_kind = "mosaic"
-        notify("   ✓ Mosaic Dataset workflow succeeded.")
-    except Exception as e:
-        notify(f"   ⚠ Mosaic Dataset workflow unavailable. Falling back to multiband+NetCDF. Details: {e}")
+        notify(" → Using Mosaic Dataset workflow.")
+    except Exception:
+        notify(" → Mosaic Dataset workflow unavailable. Using multiband+NetCDF fallback.")
         md_input = _build_netcdf_md()
         md_kind = "netcdf"
-        notify("   ✓ multiband+NetCDF workflow ready.")
+        notify(" ✓ Multiband+NetCDF workflow ready.")
 
     notify(">>> [4] Starting trend analysis using GenerateTrendRaster (this may take a while)...")
     notify(">>> [4] 开始趋势分析 GenerateTrendRaster（这一步可能较慢）...")
@@ -231,21 +233,27 @@ def trend_analysis(
     zscore_ras = ExtractByMask(trend.getRasterBands(5), mask_ras)
     zscore_ras.save(os.path.join(output_folder, zscore_output))
 
-    notify(">>> [✓] All processing steps complete. Cleaning up temporary files...")
+    notify(">>> [✓] All processing steps complete.\nCleaning up temporary files...")
     notify(">>> [✓] 全部处理完成。准备清理中间文件...")
 
     try:
-        if md_kind == "mosaic":
-            _safe_delete(loggdb)
-    except Exception as e:
-        notify(f"【警告，可忽略】⚠ 无法清理中间文件，可能正被锁定。请稍后手动删除。详细信息：{e}")
-        notify(f"[Warning: Can be ignored] ⚠ Unable to clean intermediate files. They may be locked. Please delete them manually later. Details: {e}")
+        # 1) 删除两种 workflow 可能产生的中间数据库
+        _safe_delete(loggdb)
+        _safe_delete(md_gdb)
 
-    for p in focal_paths:
-        _safe_delete(p)
+        # 2) 删除 NetCDF 中间文件及其附属文件
+        _safe_delete(out_netcdf)
+        _safe_delete(out_netcdf + ".aux.xml")
+
+        # 3) 删除逐年平滑后的中间 tif
+        for p in focal_paths:
+            _safe_delete(p)
+
+    except Exception as e:
+        notify(f"〖警告，可忽略〗⚠ 无法清理中间文件，可能正被锁定。请稍后手动删除。详细信息：{e}")
+        notify(f"[Warning: Can be ignored] ⚠ Unable to clean intermediate files. They may be locked. Please delete them manually later. Details: {e}")
 
     arcpy.CheckInExtension("Spatial")
     arcpy.CheckInExtension("ImageAnalyst")
-
     notify("完成100%")
     notify("Complete 100%")
