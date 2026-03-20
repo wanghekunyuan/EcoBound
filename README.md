@@ -1,11 +1,7 @@
-# **EcoBound v3.22 — Trend026 Hotfix Update**
+# **EcoBound v3.23 — Trend026 Hotfix Update**
 
 What’s new  
-- **Fix (ArcGIS Pro Basic compatible):** Trend026 now supports ArcGIS Pro **Basic**. When Mosaic Dataset tools are unavailable, it automatically falls back to  
-  **CompositeBands → RasterToNetCDF → GenerateTrendRaster** (Standard/Advanced will still use the Mosaic workflow when available).
-- **Time dimension:** Uses the **4-digit number parsed from filenames** as `ZOrder` to build the temporal sequence (e.g., 2000–2024). Missing intervals are allowed.
-- **Consistency:** Trend outputs (**Sen’s slope** and **Mann–Kendall Z-score**) remain consistent with the original workflow for the same inputs.
-- **Also included:** Interaction Detector no longer fails when the raster has `noDataValue=None`.
+- **A hot fix improving interaction of trend analysis.
 
 **A Complete Guide for GeoDetector, Ecological Risk Detection, and Natural Geographical Boundary Extraction (ArcGIS Pro Compatible)**
 
