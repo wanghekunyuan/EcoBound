@@ -3,11 +3,9 @@
 What’s new  
 - **A hot fix improving interaction of trend analysis.
 
-**A Complete Guide for GeoDetector, Ecological Risk Detection, and Natural Geographical Boundary Extraction (ArcGIS Pro Compatible)**
+**EcoBound, A Python package for GeoDetector, Ecological Risk Detection, and Natural Geographical Boundary Extraction**
 
-This repository provides a complete implementation and usage guide for **GeoDetector-based ecological analysis**, powered by the **EcoBound toolkit**, a modular Python framework for ecological boundary extraction, threshold detection, and advanced risk mapping based on ArcGIS Pro.
-
-> 🗞 This README also serves as Supplementary Material 2 (SM2) of our manuscript.  
+> 🗞 This README also serves as Supplementary Material 2 (SM2) of our manuscript (publishing).  
 >
 > The mathematical foundations of EcoBound are provided in SM1 of our manuscript.
 ---
