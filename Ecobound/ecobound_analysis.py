@@ -26,40 +26,160 @@ def compute_entropy(p):
     p = p[p > 0]
     return -np.sum(p * np.log(p))
 
-def entropy_gain_scan(R, counts, B=30):
+def entropy_gain_profile(R, counts, centers, B=30):
+    """
+    计算完整的 weighted information-gain profile。
+    返回：
+        full_indices        : 每个候选切点在完整 centers 中的索引
+        threshold_values    : 对应候选阈值（centers[full_indices]）
+        score_values        : weighted information gain
+    说明：
+        - 不改前端输入；
+        - 仅作为后端诊断 / CSV 导出 / 画 profile 曲线使用；
+        - best_k 仍由 entropy_gain_scan() 返回。
+    """
     valid = (~np.isnan(R)) & (counts > 0)
+    valid_indices = np.where(valid)[0]
+
     R_valid = R[valid]
     w_valid = counts[valid]
-    C = len(R_valid)
 
-    Rn = np.minimum(np.floor((R_valid - R_valid.min()) / (R_valid.ptp() + 1e-12) * B).astype(int), B - 1)
+    if len(R_valid) < 2:
+        return np.array([], dtype=int), np.array([], dtype=float), np.array([], dtype=float)
 
-    nAb = np.zeros(B)
+    r_min = R_valid.min()
+    r_range = R_valid.ptp() + 1e-12
+    Rn = np.minimum(
+        np.floor((R_valid - r_min) / r_range * B).astype(int),
+        B - 1
+    )
+
+    # 全局分布
+    nAb = np.zeros(B, dtype=float)
     for i in range(len(Rn)):
         nAb[Rn[i]] += w_valid[i]
-    PAb = nAb / np.sum(nAb)
+
+    total_weight = np.sum(nAb)
+    if total_weight <= 0:
+        return np.array([], dtype=int), np.array([], dtype=float), np.array([], dtype=float)
+
+    PAb = nAb / total_weight
     Hall = compute_entropy(PAb)
 
-    max_delta_H = -np.inf
-    best_k = -1
+    full_indices = []
+    threshold_values = []
+    score_values = []
 
-    for k in range(1, C):
-        nLb = np.zeros(B)
-        nRb = np.zeros(B)
-        for i in range(C):
+    C_valid = len(R_valid)
+    for k in range(1, C_valid):
+        nLb = np.zeros(B, dtype=float)
+        nRb = np.zeros(B, dtype=float)
+
+        for i in range(C_valid):
             if i < k:
                 nLb[Rn[i]] += w_valid[i]
             else:
                 nRb[Rn[i]] += w_valid[i]
-        PLb = nLb / np.sum(nLb) if np.sum(nLb) > 0 else np.zeros(B)
-        PRb = nRb / np.sum(nRb) if np.sum(nRb) > 0 else np.zeros(B)
+
+        NL = np.sum(nLb)
+        NR = np.sum(nRb)
+        N = NL + NR
+
+        if NL <= 0 or NR <= 0 or N <= 0:
+            continue
+
+        PLb = nLb / NL
+        PRb = nRb / NR
+
         HL = compute_entropy(PLb)
         HR = compute_entropy(PRb)
-        delta_H = HL + HR - Hall
-        if delta_H > max_delta_H:
-            max_delta_H = delta_H
-            best_k = k
-    return best_k
+
+        # --- v3.30 patch: weighted information gain ---
+        score = Hall - ((NL / N) * HL + (NR / N) * HR)
+
+        # 注意：这里返回的是“完整 centers”中的真实索引，而不是 valid 子序列索引
+        full_k = valid_indices[k]
+
+        full_indices.append(full_k)
+        threshold_values.append(float(centers[full_k]))
+        score_values.append(float(score))
+
+    return (
+        np.array(full_indices, dtype=int),
+        np.array(threshold_values, dtype=float),
+        np.array(score_values, dtype=float),
+    )
+
+
+def entropy_gain_scan(R, counts, B=30):
+    """
+    v3.30:
+    使用 weighted information gain 选择阈值；
+    返回“完整 centers”中的 best_k，保证后续 centers[k] 不错位。
+    """
+    valid = (~np.isnan(R)) & (counts > 0)
+    valid_indices = np.where(valid)[0]
+
+    R_valid = R[valid]
+    w_valid = counts[valid]
+
+    if len(R_valid) < 2:
+        return -1
+
+    r_min = R_valid.min()
+    r_range = R_valid.ptp() + 1e-12
+    Rn = np.minimum(
+        np.floor((R_valid - r_min) / r_range * B).astype(int),
+        B - 1
+    )
+
+    # 全局分布
+    nAb = np.zeros(B, dtype=float)
+    for i in range(len(Rn)):
+        nAb[Rn[i]] += w_valid[i]
+
+    total_weight = np.sum(nAb)
+    if total_weight <= 0:
+        return -1
+
+    PAb = nAb / total_weight
+    Hall = compute_entropy(PAb)
+
+    best_score = -np.inf
+    best_k_full = -1
+
+    C_valid = len(R_valid)
+    for k in range(1, C_valid):
+        nLb = np.zeros(B, dtype=float)
+        nRb = np.zeros(B, dtype=float)
+
+        for i in range(C_valid):
+            if i < k:
+                nLb[Rn[i]] += w_valid[i]
+            else:
+                nRb[Rn[i]] += w_valid[i]
+
+        NL = np.sum(nLb)
+        NR = np.sum(nRb)
+        N = NL + NR
+
+        if NL <= 0 or NR <= 0 or N <= 0:
+            continue
+
+        PLb = nLb / NL
+        PRb = nRb / NR
+
+        HL = compute_entropy(PLb)
+        HR = compute_entropy(PRb)
+
+        # --- v3.30 patch: weighted information gain ---
+        score = Hall - ((NL / N) * HL + (NR / N) * HR)
+
+        if score > best_score:
+            best_score = score
+            best_k_full = int(valid_indices[k])
+
+    return best_k_full
 
 def variance_reduction_threshold(X, Y, centers, k):
     T = centers[k]
@@ -119,7 +239,14 @@ def run_ecobound_analysis(rasX_path, rasY_path, C1=30, B_bins=50):
     rasY_flat = (rasY_flat - Y_mean) / (Y_std + 1e-12)
 
     centers, counts, Y_means = bin_stats(rasX_flat, rasY_flat, C=C1)
+
+    # v3.30：先计算完整 profile（后端保存，前端不变）
+    profile_k, profile_T, profile_score = entropy_gain_profile(Y_means, counts, centers, B=B_bins)
+
     best_k = entropy_gain_scan(Y_means, counts, B=B_bins)
+    if best_k < 0:
+        raise RuntimeError("No valid threshold was found in entropy_gain_scan().")
+
     vr_best, T_entropy = variance_reduction_threshold(rasX_flat, rasY_flat, centers, best_k)
 
     print(f"首要生态阈值 (Primary ecological threshold) (熵增扫描) T_entropy = {T_entropy:.6f}")
@@ -179,8 +306,19 @@ class EcoBoundAnalyzer:
 
     def run_ecobound(self, C1=100, B_bins=30):
         self.centers, self.counts, self.Y_means = bin_stats(self.X_flat, self.Y_flat, C=C1)
+
+        # v3.30：完整 weighted information-gain profile（仅后端保存，不改 UI）
+        self.profile_k, self.profile_T, self.profile_score = entropy_gain_profile(
+            self.Y_means, self.counts, self.centers, B=B_bins
+        )
+
         self.best_k = entropy_gain_scan(self.Y_means, self.counts, B=B_bins)
-        self.vr_best, self.T_entropy = variance_reduction_threshold(self.X_flat, self.Y_flat, self.centers, self.best_k)
+        if self.best_k < 0:
+            raise RuntimeError("No valid threshold was found in entropy_gain_scan().")
+
+        self.vr_best, self.T_entropy = variance_reduction_threshold(
+            self.X_flat, self.Y_flat, self.centers, self.best_k
+        )
 
         print(f"首要生态阈值 (Primary ecological threshold) (熵增扫描) T_entropy = {self.T_entropy:.6f}")
         print(f"对应方差削减率 (Variance reduction rate) VR = {self.vr_best:.4f}")
