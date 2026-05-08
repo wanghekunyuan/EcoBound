@@ -1,4 +1,4 @@
-#(V 3.20 updated)
+#(V 3.30 updated)
 import os
 import arcpy
 from arcpy.sa import *
@@ -7,6 +7,7 @@ import scipy.stats as stats
 import pandas as pd
 import time
 import logging
+import re
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -300,6 +301,7 @@ class Geodetector:
         logging.info("完成 Q 统计量的串行计算。")
 
 
+
     def filter_q_results(self):
         """根据模式过滤 Q 结果，仅在 qmax 模式下。"""
         if not self.q_results:
@@ -308,16 +310,67 @@ class Geodetector:
             return
 
         q_results_df = pd.DataFrame(self.q_results)
+
         if 'Significant' not in q_results_df.columns:
             logging.error("'Significant' 列不存在于 Q 结果中。")
             self.filtered_q_results = pd.DataFrame()
             return
 
         if self.mode == 'qmax':
-            q_results_df['Base_X'] = q_results_df['Raster'].apply(lambda x: os.path.basename(x).split('_')[0])
-            filtered = q_results_df[q_results_df['Significant'] == True].groupby('Base_X').apply(lambda df: df.loc[df['Q_statistic'].idxmax()]).reset_index(drop=True)
+
+            def get_base_x_from_sliced_name(path):
+                """
+                qmax 分组名提取逻辑：
+                sliced raster 命名格式为：
+                    原始X名_分区数_方法缩写.tif
+
+                例如：
+                    ERA5_windspeed100_mean_2017_2024_5_gi.tif
+                应归为：
+                    ERA5_windspeed100_mean_2017_2024
+
+                这里只删除末尾的 _数字_方法缩写，
+                不再使用 split('_')[0]，避免把多个同前缀变量错误归为一组。
+                """
+
+                # 同时兼容 Windows 路径反斜杠和普通路径
+                name = os.path.basename(str(path).replace("\\", "/"))
+                name = os.path.splitext(name)[0]
+
+                parts = name.rsplit("_", 2)
+
+                # 当前 slice 命名中的方法缩写
+                slice_suffixes = {"ei", "ea", "nb", "gi"}
+
+                if (
+                    len(parts) == 3
+                    and parts[1].isdigit()
+                    and parts[2].lower() in slice_suffixes
+                ):
+                    return parts[0]
+
+                # 如果不是当前 slice 命名格式，退回原始旧逻辑，避免影响旧数据
+                return name.split("_")[0]
+
+            q_results_df['Base_X'] = q_results_df['Raster'].apply(get_base_x_from_sliced_name)
+
+            significant_df = q_results_df[q_results_df['Significant'] == True]
+
+            if significant_df.empty:
+                logging.warning("没有显著的 Q 结果，filtered_q_results 为空。")
+                self.filtered_q_results = pd.DataFrame()
+                return
+
+            filtered = (
+                significant_df
+                .groupby('Base_X', group_keys=False)
+                .apply(lambda df: df.loc[df['Q_statistic'].idxmax()])
+                .reset_index(drop=True)
+            )
+
             self.filtered_q_results = filtered
             logging.info(f"在 qmax 模式下，过滤后得到 {len(self.filtered_q_results)} 个结果。")
+
         else:
             filtered = q_results_df[q_results_df['Significant'] == True]
             self.filtered_q_results = filtered
