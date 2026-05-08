@@ -1,13 +1,35 @@
-# **EcoBound v3.23 — Trend026 Hotfix Update**
+# EcoBound v3.30 — Module 4 Patch Update
 
-What’s new  
-- **A hot fix improving interaction of trend analysis.
+## What’s new
 
-**EcoBound, A Python package for GeoDetector, Ecological Risk Detection, and Natural Geographical Boundary Extraction**
+This release updates **Module 4 (EcoBound and Natural Geographic Boundary Detector)** and includes three major improvements:
 
-> 🗞 This README also serves as Supplementary Material 2 (SM2) of our manuscript (publishing).  
->
-> The mathematical foundations of EcoBound are provided in SM1 of our manuscript.
+1. **Threshold score patch**  
+   The legacy unweighted entropy score used in threshold scanning has been replaced by a **weighted information-gain criterion**, improving threshold recovery and reducing edge bias.
+
+2. **Boundary output fallback for ArcGIS Basic**  
+   When line extraction tools are unavailable under ArcGIS Basic, EcoBound now preserves and exports detected **boundary polygons** instead of failing during boundary generation.
+
+3. **Full threshold profile export**  
+   EcoBound now exports the complete threshold-scan profile for each explanatory variable, allowing users to inspect all candidate cutpoints rather than only the final selected threshold.
+
+## Mathematical documentation
+
+Mathematical notes for the current public implementation are provided in:
+
+- `docs/EcoBound_v330_math_principles.docx`
+
+## Notes
+
+- This release updates the **software implementation** of EcoBound.
+- It does **not** change the workflow, function inputs, or toolbox interface.
+- Existing script mode and toolbox mode usage remain unchanged.
+
+---
+
+## Cite
+Wanghe, K., et al. (2026). EcoBound: translating ecological thresholds into spatially explicit conservation boundaries. Ecological Indicators, 114878. https://doi.org/10.1016/j.ecolind.2026.114878
+
 ---
 
 ## 📦 Installation
@@ -787,12 +809,7 @@ This means:
 ## 📖 Citation Requirement
 
 If you use **EcoBound** or any of its components (e.g., GeoDetector, MACD-based risk, entropy threshold detection) in academic research, reports, or presentations, you **must cite** the following reference:
-
-> Wanghe, K., et al. *EcoBound: A Python package for GeoDetector, Ecological Risk Detection, and Natural Geographical Boundary Extraction*  （Unpublished）
->
-> This GitHub page before the above paper published.
-
-Failure to properly cite the original work may constitute a violation of this license.
+Wanghe, K., et al. (2026). EcoBound: translating ecological thresholds into spatially explicit conservation boundaries. Ecological Indicators, 114878. https://doi.org/10.1016/j.ecolind.2026.114878
 
 ## 🔗 Contact
 
